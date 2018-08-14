@@ -27,6 +27,7 @@ inline GLenum VertexType(Maxwell::VertexAttribute attrib) {
     case Maxwell::VertexAttribute::Type::UnsignedNorm: {
 
         switch (attrib.size) {
+        case Maxwell::VertexAttribute::Size::Size_8:
         case Maxwell::VertexAttribute::Size::Size_8_8:
         case Maxwell::VertexAttribute::Size::Size_8_8_8_8:
             return GL_UNSIGNED_BYTE;
@@ -91,6 +92,8 @@ inline GLenum PrimitiveTopology(Maxwell::PrimitiveTopology topology) {
     switch (topology) {
     case Maxwell::PrimitiveTopology::Points:
         return GL_POINTS;
+    case Maxwell::PrimitiveTopology::LineStrip:
+        return GL_LINE_STRIP;
     case Maxwell::PrimitiveTopology::Triangles:
         return GL_TRIANGLES;
     case Maxwell::PrimitiveTopology::TriangleStrip:

@@ -532,7 +532,6 @@ static ResultCode CreateThread(Handle* out_handle, VAddr entry_point, u64 arg, V
     CASCADE_RESULT(thread->guest_handle, g_handle_table.Create(thread));
     *out_handle = thread->guest_handle;
 
-    Core::System::GetInstance().PrepareReschedule();
     Core::System::GetInstance().CpuCore(thread->processor_id).PrepareReschedule();
 
     LOG_TRACE(Kernel_SVC,
@@ -706,8 +705,7 @@ static ResultCode SignalProcessWideKey(VAddr condition_variable_addr, s32 target
             Handle owner_handle = static_cast<Handle>(mutex_val & Mutex::MutexOwnerMask);
             auto owner = g_handle_table.Get<Thread>(owner_handle);
             ASSERT(owner);
-            ASSERT(thread->status != ThreadStatus::Running);
-            thread->status = ThreadStatus::WaitMutex;
+            ASSERT(thread->status == ThreadStatus::WaitMutex);
             thread->wakeup_callback = nullptr;
 
             owner->AddMutexWaiter(thread);

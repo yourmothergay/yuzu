@@ -23,6 +23,7 @@
 #include "core/hle/kernel/object.h"
 #include "core/hle/kernel/process.h"
 #include "core/hle/kernel/thread.h"
+#include "core/hle/lock.h"
 #include "core/hle/result.h"
 #include "core/memory.h"
 
@@ -104,6 +105,10 @@ void ExitCurrentThread() {
  */
 static void ThreadWakeupCallback(u64 thread_handle, int cycles_late) {
     const auto proper_handle = static_cast<Handle>(thread_handle);
+
+    // Lock the global kernel mutex when we enter the kernel HLE.
+    std::lock_guard<std::recursive_mutex> lock(HLE::g_hle_lock);
+
     SharedPtr<Thread> thread = wakeup_callback_handle_table.Get<Thread>(proper_handle);
     if (thread == nullptr) {
         LOG_CRITICAL(Kernel, "Callback fired for invalid thread {:08X}", proper_handle);
@@ -155,8 +160,10 @@ void Thread::WakeAfterDelay(s64 nanoseconds) {
     if (nanoseconds == -1)
         return;
 
-    CoreTiming::ScheduleEvent(CoreTiming::nsToCycles(nanoseconds), ThreadWakeupEventType,
-                              callback_handle);
+    // This function might be called from any thread so we have to be cautious and use the
+    // thread-safe version of ScheduleEvent.
+    CoreTiming::ScheduleEventThreadsafe(CoreTiming::nsToCycles(nanoseconds), ThreadWakeupEventType,
+                                        callback_handle);
 }
 
 void Thread::CancelWakeupTimer() {
@@ -419,12 +426,33 @@ VAddr Thread::GetCommandBufferAddress() const {
 }
 
 void Thread::AddMutexWaiter(SharedPtr<Thread> thread) {
+    if (thread->lock_owner == this) {
+        // If the thread is already waiting for this thread to release the mutex, ensure that the
+        // waiters list is consistent and return without doing anything.
+        auto itr = std::find(wait_mutex_threads.begin(), wait_mutex_threads.end(), thread);
+        ASSERT(itr != wait_mutex_threads.end());
+        return;
+    }
+
+    // A thread can't wait on two different mutexes at the same time.
+    ASSERT(thread->lock_owner == nullptr);
+
+    // Ensure that the thread is not already in the list of mutex waiters
+    auto itr = std::find(wait_mutex_threads.begin(), wait_mutex_threads.end(), thread);
+    ASSERT(itr == wait_mutex_threads.end());
+
     thread->lock_owner = this;
     wait_mutex_threads.emplace_back(std::move(thread));
     UpdatePriority();
 }
 
 void Thread::RemoveMutexWaiter(SharedPtr<Thread> thread) {
+    ASSERT(thread->lock_owner == this);
+
+    // Ensure that the thread is in the list of mutex waiters
+    auto itr = std::find(wait_mutex_threads.begin(), wait_mutex_threads.end(), thread);
+    ASSERT(itr != wait_mutex_threads.end());
+
     boost::remove_erase(wait_mutex_threads, thread);
     thread->lock_owner = nullptr;
     UpdatePriority();
